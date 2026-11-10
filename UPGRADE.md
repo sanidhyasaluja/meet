@@ -45,6 +45,18 @@ parse as a UUID, yet to normalize to an existing room's id, matched no registere
 unregistered one. The token minted for that unregistered room was valid for the registered room: anyone could join a
 trusted or restricted room without being admitted through the lobby.
 
+### User emails matched in a single normalized form
+
+User emails are now stored stripped, with their ASCII letters lowercased, and compared exactly. A migration normalizes
+the stored emails and stores blank ones as NULL. Other letters keep their case.
+
+- With `OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION` disabled (the default), a new `sub` whose email is already used by
+another user is now refused, by the OIDC login and by the external API, instead of getting a second account. To keep
+creating user with a duplicate mail, set the new `OIDC_ALLOW_DUPLICATE_EMAILS=True`.
+- Known limitation: provisional users still have a unique constraint comparing lowercased emails,
+non-ASCII letters included. Provisioning an email that differs from another provisional user's only by the case of a
+non-ASCII letter (e.g. `É` and `é`) returns a 409.
+
 ## v1.37.0
 
 ### Crisp support chat replaced by the La Suite support form

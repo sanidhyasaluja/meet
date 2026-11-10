@@ -296,17 +296,26 @@ def test_finds_user_by_sub(django_assert_num_queries):
 
 
 def test_finds_user_when_email_fallback_disabled(django_assert_num_queries, settings):
-    """Should not return a user when not found by sub, and email fallback is disabled."""
+    """Should refuse a sub that is not found when its email is already used, and email
+    fallback is disabled."""
 
     settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = False
+    settings.OIDC_ALLOW_DUPLICATE_EMAILS = False
 
     klass = OIDCAuthenticationBackend()
     db_user = UserFactory(email="foo@mail.com")
 
-    with django_assert_num_queries(1):
-        user = klass.get_existing_user("wrong-sub", db_user.email)
-
-    assert user is None
+    with (
+        django_assert_num_queries(2),
+        pytest.raises(
+            SuspiciousOperation,
+            match=(
+                "We couldn't find a user with this sub but the email is already "
+                "associated with a registered user."
+            ),
+        ),
+    ):
+        klass.get_existing_user("wrong-sub", db_user.email)
 
 
 def test_finds_user_when_email_is_none(django_assert_num_queries, settings):
@@ -340,7 +349,7 @@ def test_finds_user_by_email(django_assert_num_queries, settings):
 
 
 def test_finds_user_case_insensitive_email(django_assert_num_queries, settings):
-    """Should match email case-insensitively when falling back to email."""
+    """Should match email ignoring ASCII case when falling back to email."""
     settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = True
 
     klass = OIDCAuthenticationBackend()
@@ -353,7 +362,7 @@ def test_finds_user_case_insensitive_email(django_assert_num_queries, settings):
 
 
 def test_finds_user_multiple_users_same_email(django_assert_num_queries, settings):
-    """Should handle multiple users with same email appropriately."""
+    """Should refuse to pick one of several active users sharing the email."""
 
     settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = True
 
@@ -366,25 +375,178 @@ def test_finds_user_multiple_users_same_email(django_assert_num_queries, setting
         django_assert_num_queries(2),
         pytest.raises(
             SuspiciousOperation,
-            match="Multiple user accounts share a common email.",
+            match="Several active users are associated with this email.",
         ),
     ):
         klass.get_existing_user("wrong-sub", email)
 
 
 def test_finds_user_whitespace_email(django_assert_num_queries, settings):
-    """Should not match emails with whitespace."""
+    """Should match emails with surrounding whitespace once stripped."""
 
     settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = True
     settings.OIDC_CREATE_USER = False
 
     klass = OIDCAuthenticationBackend()
-    UserFactory(email="foo@mail.com")
+    db_user = UserFactory(email="foo@mail.com")
 
     with django_assert_num_queries(2):
         user = klass.get_existing_user("wrong-sub", " foo@mail.com ")
 
-    assert user is None
+    assert user == db_user
+
+
+def test_authentication_getter_existing_user_via_email_case_insensitive(
+    monkeypatch, settings
+):
+    """
+    If an existing user doesn't match the sub but matches the email with another
+    ASCII case, the user should be returned and its email should stay normalized.
+    """
+
+    settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = True
+
+    klass = OIDCAuthenticationBackend()
+    db_user = UserFactory(email="john.doe@example.com")
+
+    def get_userinfo_mocked(*args):
+        return {"sub": "123", "email": "JOHN.DOE@EXAMPLE.COM"}
+
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
+
+    user = klass.get_or_create_user(
+        access_token="test-token", id_token=None, payload=None
+    )
+
+    assert user == db_user
+    db_user.refresh_from_db()
+    assert db_user.email == "john.doe@example.com"
+
+
+@pytest.mark.parametrize(
+    "email",
+    [
+        "dısk@example.com",
+        "diſk@example.com",
+        "disK@example.com",
+    ],
+    ids=["dotless-i", "long-s", "kelvin-sign"],
+)
+@pytest.mark.parametrize("fallback", [True, False])
+def test_authentication_getter_existing_user_via_email_non_ascii(
+    monkeypatch, settings, fallback, email
+):
+    """
+    If an existing user doesn't match the sub and the email only matches its email
+    through Unicode case folding, a new user should be created and the existing user
+    should be left untouched.
+    """
+
+    settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = fallback
+    settings.OIDC_ALLOW_DUPLICATE_EMAILS = False
+
+    klass = OIDCAuthenticationBackend()
+    db_user = UserFactory(email="disk@example.com")
+    db_sub = db_user.sub
+
+    def get_userinfo_mocked(*args):
+        return {"sub": "other-sub", "email": email}
+
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
+
+    user = klass.get_or_create_user(
+        access_token="test-token", id_token=None, payload=None
+    )
+
+    assert user != db_user
+    assert user.sub == "other-sub"
+    assert user.email == email
+    assert models.User.objects.count() == 2
+    db_user.refresh_from_db()
+    assert db_user.sub == db_sub
+    assert db_user.email == "disk@example.com"
+
+
+def test_authentication_getter_existing_inactive_user_via_email(monkeypatch, settings):
+    """
+    If the only user matching the email is inactive, the login should be refused
+    instead of creating another user.
+    """
+
+    settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = True
+
+    klass = OIDCAuthenticationBackend()
+    UserFactory(email="john.doe@example.com", is_active=False)
+
+    def get_userinfo_mocked(*args):
+        return {"sub": "123", "email": "John.Doe@example.com"}
+
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
+
+    with pytest.raises(SuspiciousOperation, match="User account is disabled"):
+        klass.get_or_create_user(access_token="test-token", id_token=None, payload=None)
+
+    assert models.User.objects.count() == 1
+
+
+def test_authentication_getter_no_fallback_to_email_no_duplicate(monkeypatch, settings):
+    """
+    When the email fallback is disabled, an unknown sub whose email is already used,
+    in another ASCII case, should be refused instead of creating a second user.
+    """
+
+    settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = False
+    settings.OIDC_ALLOW_DUPLICATE_EMAILS = False
+
+    klass = OIDCAuthenticationBackend()
+    db_user = UserFactory(email="john.doe@example.com")
+
+    def get_userinfo_mocked(*args):
+        return {"sub": "123", "email": "JOHN.DOE@EXAMPLE.COM"}
+
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
+
+    with pytest.raises(
+        SuspiciousOperation,
+        match=(
+            "We couldn't find a user with this sub but the email is already "
+            "associated with a registered user."
+        ),
+    ):
+        klass.get_or_create_user(access_token="test-token", id_token=None, payload=None)
+
+    assert models.User.objects.count() == 1
+    db_user.refresh_from_db()
+    assert db_user.sub != "123"
+
+
+def test_authentication_getter_no_fallback_to_email_allow_duplicate(
+    monkeypatch, settings
+):
+    """
+    When the email fallback is disabled and duplicate emails are allowed, an unknown
+    sub whose email is already used should get a new user.
+    """
+
+    settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION = False
+    settings.OIDC_ALLOW_DUPLICATE_EMAILS = True
+
+    klass = OIDCAuthenticationBackend()
+    db_user = UserFactory(email="john.doe@example.com")
+
+    def get_userinfo_mocked(*args):
+        return {"sub": "123", "email": "JOHN.DOE@EXAMPLE.COM"}
+
+    monkeypatch.setattr(OIDCAuthenticationBackend, "get_userinfo", get_userinfo_mocked)
+
+    user = klass.get_or_create_user(
+        access_token="test-token", id_token=None, payload=None
+    )
+
+    assert user != db_user
+    assert user.sub == "123"
+    assert user.email == "john.doe@example.com"
+    assert models.User.objects.count() == 2
 
 
 @pytest.mark.parametrize(

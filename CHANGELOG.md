@@ -27,6 +27,7 @@ and this project adheres to
 - 🔒️(frontend) send the display name in the join request body
 - 🔥(backend) drop is_administrable from unregistered room payloads
 - 🍱(frontend) add Portuguese glyphs to Marianne subsetted fonts
+- ♻️(backend) match emails in a single normalized form
 
 ### Fixed
 

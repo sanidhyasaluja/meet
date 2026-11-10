@@ -13,7 +13,7 @@ from lasuite.oidc_login.backends import (
 )
 from rest_framework.authentication import SessionAuthentication
 
-from core.models import User
+from core.models import DuplicateEmailError, User
 from core.validators import sub_validator
 
 
@@ -83,18 +83,9 @@ class OIDCAuthenticationBackend(LaSuiteOIDCAuthenticationBackend):
             ) from err
 
         try:
-            return User.objects.get(sub=sub)
-        except User.DoesNotExist:
-            if email and settings.OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION:
-                try:
-                    return User.objects.get(email__iexact=email)
-                except User.DoesNotExist:
-                    pass
-                except User.MultipleObjectsReturned as e:
-                    raise SuspiciousOperation(
-                        "Multiple user accounts share a common email."
-                    ) from e
-        return None
+            return User.objects.get_user_by_sub_or_email(sub, email)
+        except DuplicateEmailError as err:
+            raise SuspiciousOperation(err.message) from err
 
 
 class SessionAuthenticationWith401(SessionAuthentication):
