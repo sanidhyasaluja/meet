@@ -28,6 +28,7 @@ and this project adheres to
 - 🔥(backend) drop is_administrable from unregistered room payloads
 - 🍱(frontend) add Portuguese glyphs to Marianne subsetted fonts
 - ♻️(backend) match emails in a single normalized form
+- ⚡️(backend) index user emails for exact lookups
 
 ### Fixed
 
