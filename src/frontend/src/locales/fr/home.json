@@ -25,6 +25,7 @@
     "copy": "Copier les informations",
     "copied": "Copiées dans le presse-papiers",
     "copyUrl": "Copier le lien de la réunion",
+    "copiedUrl": "Lien de la réunion copié dans le presse-papiers",
     "phone": {
       "call": "Appelez le :",
       "pinCode": "Code :"

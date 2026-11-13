@@ -25,6 +25,7 @@
     "copy": "Copiar informações",
     "copied": "Informações copiadas para a área de transferência",
     "copyUrl": "Copiar o link da reunião",
+    "copiedUrl": "Link da reunião copiado para a área de transferência",
     "phone": {
       "call": "Ligar:",
       "pinCode": "Código:"

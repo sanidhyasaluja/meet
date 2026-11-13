@@ -25,6 +25,7 @@
     "copy": "Copiar los datos",
     "copied": "Copiados en el portapapeles",
     "copyUrl": "Copiar el enlace de la reunión",
+    "copiedUrl": "Enlace de la reunión copiado en el portapapeles",
     "phone": {
       "call": "Llama al:",
       "pinCode": "Código:"

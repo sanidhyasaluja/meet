@@ -25,6 +25,7 @@
     "copy": "Copy information",
     "copied": "Information copied to clipboard",
     "copyUrl": "Copy the meeting link",
+    "copiedUrl": "Meeting link copied to clipboard",
     "phone": {
       "call": "Call:",
       "pinCode": "Code:"

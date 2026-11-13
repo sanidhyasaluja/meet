@@ -33,9 +33,23 @@ export const LaterMeetingDialog = ({
     copyRoomUrlToClipboard,
   } = useCopyRoomToClipboard(room || undefined)
 
+  const copyStatusMessage = isCopied
+    ? t('copied')
+    : isRoomUrlCopied
+      ? t('copiedUrl')
+      : ''
+
   return (
     <Dialog isOpen={!!room} {...dialogProps} title={t('heading')}>
       <P>{t('description')}</P>
+      <div
+        role="status"
+        aria-live="assertive"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {copyStatusMessage}
+      </div>
       {!!roomUrl && (
         <>
           {isTelephonyReadyForUse ? (
